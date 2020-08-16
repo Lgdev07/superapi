@@ -2,20 +2,69 @@ package controllers
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
 	"net/http"
-	"os"
-	"strconv"
+	"strings"
 
 	"github.com/Lgdev07/superapi/api/models"
+	"github.com/Lgdev07/superapi/api/services"
 	"github.com/Lgdev07/superapi/api/utils"
+	"github.com/gorilla/mux"
 )
 
-func (s *Server) CreateSuper(w http.ResponseWriter, r *http.Request) {
-	apiToken := os.Getenv("SUPERHERO_API_TOKEN")
+// ListSupers returns a formated response with the supers list
+func (s *Server) ListSupers(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
 
-	var responseInterface map[string]interface{}
+	params := map[string]string{
+		"name":      strings.Join(query["name"], ""),
+		"alignment": strings.Join(query["alignment"], ""),
+	}
+
+	supers, err := models.FindSupers(s.DB, params)
+	if err != nil {
+		utils.ERROR(w, http.StatusBadRequest, err)
+		return
+	}
+
+	utils.JSON(w, http.StatusOK, supers)
+	return
+}
+
+// DeleteSuper deletes a super and returns the deleted id
+func (s *Server) DeleteSuper(w http.ResponseWriter, r *http.Request) {
+	resp := map[string]interface{}{"status": "success"}
+	params := mux.Vars(r)
+
+	err := models.DeleteSuperByID(s.DB, params["id"])
+	if err != nil {
+		utils.ERROR(w, http.StatusBadRequest, err)
+		return
+	}
+
+	resp["message"] = "Deleted Super ID " + params["id"]
+	utils.JSON(w, http.StatusOK, resp)
+	return
+
+}
+
+// ShowSuper returns a formated response with the super
+func (s *Server) ShowSuper(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+
+	super, err := models.GetSuperByID(s.DB, params["id"])
+	if err != nil {
+		utils.ERROR(w, http.StatusBadRequest, err)
+		return
+	}
+
+	utils.JSON(w, http.StatusOK, super)
+	return
+
+}
+
+// CreateSuper creates a new super with the given name in body
+func (s *Server) CreateSuper(w http.ResponseWriter, r *http.Request) {
+	var responseInterface map[string]string
 
 	err := json.NewDecoder(r.Body).Decode(&responseInterface)
 	if err != nil {
@@ -23,114 +72,37 @@ func (s *Server) CreateSuper(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	url := fmt.Sprintf("https://superheroapi.com/api/%s/search/%s", apiToken, responseInterface["name"])
-
-	resp, err := http.Get(url)
+	nameTitle := strings.Title(responseInterface["name"])
+	supers, err := models.FindSupers(s.DB, map[string]string{"name": nameTitle})
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer resp.Body.Close()
-
-	var responseInterface2 map[string]interface{}
-
-	err = json.NewDecoder(resp.Body).Decode(&responseInterface2)
-	if err != nil {
-		utils.ERROR(w, http.StatusBadRequest, err)
+		utils.ERROR(w, http.StatusInternalServerError, err)
 		return
 	}
 
-	results := responseInterface2["results"].([]interface{})
-
-	for i := 0; i < len(results); i++ {
-		name := results[i].(map[string]interface{})["name"]
-
-		if name != responseInterface["name"] {
-			continue
-		}
-
-		fullName := results[i].(map[string]interface{})["biography"].(map[string]interface{})["full-name"]
-		intelligence := results[i].(map[string]interface{})["powerstats"].(map[string]interface{})["intelligence"]
-		power := results[i].(map[string]interface{})["powerstats"].(map[string]interface{})["power"]
-		occupation := results[i].(map[string]interface{})["work"].(map[string]interface{})["occupation"]
-		image := results[i].(map[string]interface{})["image"].(map[string]interface{})["url"]
-		alignment := results[i].(map[string]interface{})["biography"].(map[string]interface{})["alignment"]
-		groups := results[i].(map[string]interface{})["connections"].(map[string]interface{})["group-affiliation"]
-
-		intelligenceInt, _ := strconv.Atoi(intelligence.(string))
-		powerInt, _ := strconv.Atoi(power.(string))
-
-		super := &models.Super{
-			Name:         name.(string),
-			FullName:     fullName.(string),
-			Intelligence: intelligenceInt,
-			Power:        powerInt,
-			Occupation:   occupation.(string),
-			Image:        image.(string),
-			Alignment:    alignment.(string),
-			Groups:       groups.(string),
-		}
-
-		// Name            string    `gorm:"size:100;not null" json:"name"`
-		// FullName        string    `gorm:"not null" json:"full_name"`
-		// Intelligence    string       `gorm:"not null" json:"intelligence"`
-		// Power           string       `gorm:"not null" json:"power"`
-		// Occupation      string    `gorm:"not null" json:"occupation"`
-		// Image           string    `gorm:"not null" json:"image"`
-		// alignment       string    `gorm:"not null" json:"alignment"`
-		// Groups          string    `json:"groups"`
-		// NumberOfParents int       `json:"number_of_parents"`
-
-		createdSuper, err := super.CreateSuper(s.DB)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		utils.JSON(w, http.StatusOK, createdSuper)
+	if len(*supers) != 0 {
+		resp := map[string]string{"error": "There is Already a Super With That Same Name Registered"}
+		utils.JSON(w, http.StatusBadRequest, resp)
 		return
 	}
 
-	// body, err := ioutil.ReadAll(resp.Body)
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
+	super, status, err := services.ApiGetSuperByName(nameTitle)
+	if err != nil {
+		utils.ERROR(w, status, err)
+		return
+	}
 
-	// log.Println(string(body))
+	if super.Name == "" {
+		resp := map[string]string{"error": "No Super found with this name"}
+		utils.JSON(w, http.StatusBadRequest, resp)
+		return
+	}
 
-	// req, err := http.NewRequest("GET", url, nil)
-	// if err != nil {
-	// 	log.Print(err)
-	// 	os.Exit(1)
-	// }
+	createdSuper, err := super.Save(s.DB)
+	if err != nil {
+		utils.ERROR(w, http.StatusInternalServerError, err)
+		return
+	}
 
-	// q := req.URL.Query()
-	// req.URL.RawQuery = q.Encode()
-
-	// fmt.Println(req.URL.String())
-
-	var responseFinal = map[string]interface{}{"status": "success", "message": "Author successfully created"}
-	utils.JSON(w, http.StatusOK, responseFinal)
+	utils.JSON(w, http.StatusCreated, createdSuper)
 	return
 }
-
-func (s *Server) ListSupers(w http.ResponseWriter, r *http.Request) {
-	return
-}
-
-func (s *Server) DeleteSuper(w http.ResponseWriter, r *http.Request) {
-	return
-}
-
-func (s *Server) Index(w http.ResponseWriter, r *http.Request) {
-	var resp = map[string]interface{}{"status": "success", "message": "Author successfully created"}
-	utils.JSON(w, http.StatusOK, resp)
-	return
-}
-
-// Cadastrar um Super/Vilão
-// Listar todos os Super's cadastrados
-// Listar apenas os Super Heróis
-// Listar apenas os Super Vilões
-// Buscar por nome
-// Buscar por 'uuid'
-// Remover o Super
