@@ -13,11 +13,13 @@ import (
 	_ "github.com/jinzhu/gorm/dialects/postgres" //postgres
 )
 
+// Server is a struct representing the database and router
 type Server struct {
 	DB     *gorm.DB
 	Router *mux.Router
 }
 
+// Initialize migrate the database and initialize the routes
 func (s *Server) Initialize(DbHost, DbPort, DbUser, DbName, DbPassword string) {
 	var err error
 	DBURI := fmt.Sprintf(`host=%s port=%s user=%s dbname=%s sslmode=disable 
@@ -40,6 +42,7 @@ func (s *Server) Initialize(DbHost, DbPort, DbUser, DbName, DbPassword string) {
 
 }
 
+// Run initialize the server
 func (s *Server) Run() {
 	var port string
 	if port = os.Getenv("PORT"); port == "" {
